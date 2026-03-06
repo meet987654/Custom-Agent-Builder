@@ -100,7 +100,7 @@ create policy "Users can insert own transcripts" on public.transcripts for inser
 alter table public.livekit_sessions enable row level security;
 create policy "Users can view own sessions" on public.livekit_sessions for select using (auth.uid() = user_id);
 
--- Seeding Base Template
+-- Seeding Base Template (Section 15 — VAD, STT & Input Validation tuned defaults)
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.agents WHERE is_template = true AND name = 'Base Voice Agent Template') THEN
@@ -118,12 +118,14 @@ BEGIN
           "options": {
             "multilingual": true,
             "smart_format": true,
-            "endpointing": 300
+            "punctuate": true,
+            "no_delay": true,
+            "endpointing": 400
           }
         },
         "llm": {
           "provider": "gemini",
-          "model": "gemini-2.0-flash-exp",
+          "model": "gemini-2.0-flash-001",
           "options": {
             "temperature": 0.7,
             "max_tokens": 256
@@ -131,17 +133,34 @@ BEGIN
         },
         "tts": {
           "provider": "cartesia",
-          "model": "sonic-3",
-          "voice": "english_default",
+          "model": "sonic-2",
+          "voice": "794f9389-aac1-45b6-b726-9d9369183238",
           "speed": "normal"
         },
         "vad": {
           "provider": "silero",
-          "threshold": 0.5,
+          "threshold": 0.85,
+          "min_speech_duration_ms": 250,
+          "min_silence_duration_ms": 500,
+          "speech_pad_ms": 300,
           "barge_in": true,
-          "silence_timeout_ms": 8000
+          "barge_in_min_duration_ms": 300,
+          "noise_cancellation": true,
+          "silence_timeout_ms": 8000,
+          "first_response_timeout_secs": 20
+        },
+        "input_validation": {
+          "enabled": true,
+          "min_word_count": 2,
+          "min_duration_ms": 1500,
+          "confidence_threshold": 0.75,
+          "escalation_threshold": 3,
+          "max_consecutive_invalid": 5,
+          "filler_words": ["uh", "um", "hmm", "hm", "ah", "er", "uhh", "umm", "mmm", "oh"]
         },
         "system_prompt": "You are a helpful, professional voice assistant for [Company Name — customize this].\nYour job is to [describe your purpose here — customize this].\nBe warm, concise, and natural. Keep responses to 1–3 sentences.\nDo not use lists, bullet points, or formatting in your responses.\nYou speak with the user as a knowledgeable, calm, and friendly professional.",
+        "voice_gender": "neutral",
+        "goodbye_triggers": ["goodbye", "bye", "that's all", "no thanks", "i'm good", "thank you", "धन्यवाद", "बस", "ठीक है", "नमस्ते", "अलविदा", "આભાર", "બસ", "ઠીક છે"],
         "workflow_steps": [
           { "name": "Greeting", "description": "Greet warmly, ask how you can help", "prompt_addition": "" },
           { "name": "Understand", "description": "Gather what the user needs, clarify if unclear", "prompt_addition": "" },
