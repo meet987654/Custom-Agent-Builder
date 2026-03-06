@@ -8,9 +8,9 @@ export const VALID_MODELS: Record<string, string[]> = {
     ],
     gemini: [
         'gemini-2.0-flash-001',
-        'gemini-2.0-flash-exp',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
         'gemini-1.5-flash',
-        'gemini-1.5-pro',
     ],
     openai: [
         'gpt-4o',
