@@ -36,6 +36,7 @@ export default function LoginPage() {
                     setIsSignUp(false);
                 } else {
                     toast.success('Account created successfully!');
+                    router.refresh(); // sync server-side session before navigating
                     router.push('/dashboard');
                 }
             } else {
@@ -45,6 +46,7 @@ export default function LoginPage() {
                 });
                 if (error) throw error;
                 toast.success('Welcome back!');
+                router.refresh(); // sync server-side session before navigating
                 router.push('/dashboard');
             }
         } catch (error: any) {
