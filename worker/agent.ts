@@ -445,10 +445,9 @@ export default defineAgent({
         console.log(`[LLM] Provider: ${provider}, Model: ${resolvedModel}`);
 
         if (provider === 'groq') {
-            llmInstance = new openaiPlugin.LLM({
+            llmInstance = openaiPlugin.LLM.withGroq({
                 model: resolvedModel as any, apiKey: llmKey || undefined,
-                baseURL: 'https://api.groq.com/openai/v1',
-                temperature, maxCompletionTokens: maxTokens,
+                temperature,
             });
         } else if (provider === 'gemini' || provider === 'google') {
             llmInstance = new googlePlugin.LLM({
