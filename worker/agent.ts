@@ -1047,4 +1047,6 @@ export default defineAgent({
 cli.runApp(new WorkerOptions({
     agent: fileURLToPath(import.meta.url),
     initializeProcessTimeout: 60_000,
+    port: parseInt(process.env.PORT || '8081', 10),
+    host: '0.0.0.0',
 }));
