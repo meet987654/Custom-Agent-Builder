@@ -28,7 +28,7 @@ export const VALID_MODELS: Record<string, string[]> = {
 
 export const DEFAULT_MODEL: Record<string, string> = {
     groq: 'llama-3.3-70b-versatile',
-    gemini: 'gemini-2.0-flash-001',
+    gemini: 'gemini-1.5-flash',
     openai: 'gpt-4o-mini',
     ollama: 'llama3.2',
 };
