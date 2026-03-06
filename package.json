@@ -13,7 +13,6 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@livekit/agents": "^1.0.44",
-    "@livekit/agents-plugin-assemblyai": "^0.0.0",
     "@livekit/agents-plugin-cartesia": "^1.0.44",
     "@livekit/agents-plugin-deepgram": "^1.0.44",
     "@livekit/agents-plugin-elevenlabs": "^1.0.44",
