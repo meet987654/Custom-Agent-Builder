@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: voice-agent-worker
+    env: node
+    buildCommand: npm install
+    startCommand: npm run worker:start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
