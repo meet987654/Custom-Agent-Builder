@@ -572,7 +572,7 @@ export default defineAgent({
             stt: sttInstance,
             llm: llmInstance,
             tts: ttsInstance,
-            turnDetection: 'stt',
+            turnDetection: 'manual',
             voiceOptions: {
                 minEndpointingDelay: 0.6,
                 maxEndpointingDelay: 3.0,
@@ -970,6 +970,12 @@ export default defineAgent({
 
                 console.log(`[VALIDATOR] ✅ Valid: "${fullTranscript.slice(0, 80)}"`);
 
+                try {
+                    session.generateReply({ userInput: fullTranscript });
+                } catch (e) {
+                    console.error('[AGENT] ❌ Failed to generate manual reply:', e);
+                }
+
             }, TRANSCRIPT_DEBOUNCE_MS);
         });
 
@@ -987,13 +993,9 @@ export default defineAgent({
             console.log(`[WORKFLOW] ${totalSteps} step(s) loaded.`);
         }
 
-        // ─────────────────────────────────────────────────────────────────
-        // Participant joined → Opening greeting
-        // ─────────────────────────────────────────────────────────────────
-
-        ctx.room.on('participantConnected', async (participant) => {
-            if (participant.identity === 'agent') return;
-            console.log(`[AGENT] Human participant joined: ${participant.identity}`);
+        const greetParticipant = async (participant: any) => {
+            if (participant.identity === 'agent' || state.greeting_delivered) return;
+            console.log(`[AGENT] Human participant joined so greeting now: ${participant.identity}`);
 
             silenceHandler.stop();
 
@@ -1010,15 +1012,22 @@ export default defineAgent({
             }
 
             console.log(`[AGENT] Opening: "${openingUtterance}"`);
+            state.greeting_delivered = true;
             try {
                 await session.say(openingUtterance, { allowInterruptions: false });
             } catch (e) {
                 console.error('[AGENT] Error during opening say:', e);
             }
 
-            state.greeting_delivered = true;
             console.log('[AGENT] Opening complete. Silence timer starts via SpeechCreated callback.');
-        });
+        };
+
+        ctx.room.on('participantConnected', greetParticipant);
+
+        // Also check if they are already in the room when the agent process binds
+        for (const [id, participant] of ctx.room.remoteParticipants) {
+            void greetParticipant(participant);
+        }
 
         // ─────────────────────────────────────────────────────────────────
         // Shutdown callback
