@@ -1,17 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 
-// Initialize Supabase Admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 export async function POST(req: NextRequest) {
+    // Initialize Supabase Admin client lazily (inside handler) so it runs at
+    // request time — not at build time when env vars aren't available on Vercel.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    if (!supabaseUrl || !supabaseKey) {
+        return NextResponse.json({ error: 'Server misconfigured: missing Supabase credentials' }, { status: 500 });
+    }
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
     // 1. Verify Authentication
-    // Checking for Service Role key in Authorization header as a simple way to verify worker requests
     const authHeader = req.headers.get('Authorization');
     if (authHeader !== `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`) {
-        // Alternatively, check for user session if client-side upload allowed (but Section 10 says worker POSTs)
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
