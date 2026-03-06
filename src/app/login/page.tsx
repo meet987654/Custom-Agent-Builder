@@ -36,8 +36,7 @@ export default function LoginPage() {
                     setIsSignUp(false);
                 } else {
                     toast.success('Account created successfully!');
-                    router.refresh(); // sync server-side session before navigating
-                    router.push('/dashboard');
+                    window.location.href = '/dashboard';
                 }
             } else {
                 const { error } = await supabase.auth.signInWithPassword({
@@ -46,8 +45,7 @@ export default function LoginPage() {
                 });
                 if (error) throw error;
                 toast.success('Welcome back!');
-                router.refresh(); // sync server-side session before navigating
-                router.push('/dashboard');
+                window.location.href = '/dashboard';
             }
         } catch (error: any) {
             toast.error(error.message);
