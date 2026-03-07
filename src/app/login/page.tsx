@@ -36,7 +36,8 @@ export default function LoginPage() {
                     setIsSignUp(false);
                 } else {
                     toast.success('Account created successfully!');
-                    window.location.href = '/dashboard';
+                    router.push('/dashboard');
+                    router.refresh();
                 }
             } else {
                 const { error } = await supabase.auth.signInWithPassword({
@@ -45,7 +46,8 @@ export default function LoginPage() {
                 });
                 if (error) throw error;
                 toast.success('Welcome back!');
-                window.location.href = '/dashboard';
+                router.push('/dashboard');
+                router.refresh();
             }
         } catch (error: any) {
             toast.error(error.message);
