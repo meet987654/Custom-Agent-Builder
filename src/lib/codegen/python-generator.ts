@@ -260,6 +260,44 @@ def save_transcript(session_id: str, speaker: str, text: str):
             conn.commit()
     except Exception as e:
         logger.error(f"Failed to save transcript: {e}")
+
+def store_memory(key: str, value: str) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO memories (key, value) 
+                VALUES (?, ?) 
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+            """, (key, value))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store memory: {e}")
+        return False
+
+def get_memory(key: str) -> str | None:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM memories WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Failed to get memory: {e}")
+        return None
+
+def delete_memory(key: str) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM memories WHERE key = ?", (key,))
+            changes = conn.total_changes
+            conn.commit()
+            return changes > 0
+    except Exception as e:
+        logger.error(f"Failed to delete memory: {e}")
+        return False
 `;
 
     // --- agent/input_validator.py ---
@@ -397,14 +435,15 @@ applies barge-in noise gate, and runs pre-LLM input validation on every utteranc
 import asyncio
 import logging
 import time
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, voice
+from typing import Annotated
+from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, voice, llm
 from livekit.plugins import silero
 ${pluginImports}
 from config.agent_config import AGENT_CONFIG
 from config.system_prompt import build_system_prompt
 from config.workflow_steps import WORKFLOW_STEPS
 from agent.input_validator import InputValidator
-from database.db import init_db, save_transcript
+from database.db import init_db, save_transcript, store_memory, get_memory, delete_memory
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -413,6 +452,33 @@ logger = logging.getLogger(__name__)
 # Initialize local SQLite database
 init_db()
 
+# ── Define Database Tools ────────────────────────────────────────────────────
+class DBTools(llm.FunctionContext):
+    
+    @llm.ai_callable(desc="Save user preferences, history, facts, or any context you need to remember for later. It is a key-value store. This overwrites any existing value for the key.")
+    async def store_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The name of the memory, e.g. "user_name" or "dietary_restrictions"')],
+        value: Annotated[str, llm.TypeInfo(desc='The value to store for this memory key')]
+    ):
+        success = store_memory(key, value)
+        return f"Successfully stored memory '{key}' as '{value}'" if success else f"Failed to store memory '{key}'"
+
+    @llm.ai_callable(desc="Retrieve a previously stored memory by its key.")
+    async def get_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The exact key used when storing the memory')]
+    ):
+        value = get_memory(key)
+        return f"Memory '{key}' = {value}" if value is not None else f"Memory '{key}' not found"
+
+    @llm.ai_callable(desc="Delete a previously stored memory by its key if it is no longer relevant.")
+    async def delete_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The exact key to delete')]
+    ):
+        success = delete_memory(key)
+        return f"Successfully deleted memory '{key}'" if success else f"Memory '{key}' not found or failed to delete"
 
 async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -450,6 +516,8 @@ async def entrypoint(ctx: JobContext):
 
     # ── Input Validator (pre-LLM gate) ───────────────────────────────────────
     validator = InputValidator()
+    
+    fnc_ctx = DBTools()
 
     agent = voice.Agent(
         vad=vad_plugin,
@@ -457,6 +525,7 @@ async def entrypoint(ctx: JobContext):
         llm=llm_plugin,
         tts=tts_plugin,
         instructions=system_prompt,
+        fnc_ctx=fnc_ctx,
     )
 
     session = voice.AgentSession(
@@ -464,6 +533,7 @@ async def entrypoint(ctx: JobContext):
         stt=stt_plugin,
         llm=llm_plugin,
         tts=tts_plugin,
+        fnc_ctx=fnc_ctx,
     )
 
     # ── Barge-in noise gate ───────────────────────────────────────────────────

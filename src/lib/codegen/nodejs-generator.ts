@@ -280,6 +280,46 @@ export function getDb() {
   if (!db) initDb();
   return db;
 }
+
+export function storeMemory(key: string, value: string) {
+  if (!db) return false;
+  try {
+    const stmt = db.prepare(\`
+      INSERT INTO memories (key, value) 
+      VALUES (?, ?) 
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+    \`);
+    stmt.run(key, value);
+    return true;
+  } catch (error) {
+    console.error('[DATABASE] Failed to store memory:', error);
+    return false;
+  }
+}
+
+export function getMemory(key: string): string | null {
+  if (!db) return null;
+  try {
+    const stmt = db.prepare('SELECT value FROM memories WHERE key = ?');
+    const row = stmt.get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  } catch (error) {
+    console.error('[DATABASE] Failed to get memory:', error);
+    return null;
+  }
+}
+
+export function deleteMemory(key: string): boolean {
+  if (!db) return false;
+  try {
+    const stmt = db.prepare('DELETE FROM memories WHERE key = ?');
+    const info = stmt.run(key);
+    return info.changes > 0;
+  } catch (error) {
+    console.error('[DATABASE] Failed to delete memory:', error);
+    return false;
+  }
+}
 `;
 
   // --- agent/input-validator.ts ---
@@ -417,12 +457,59 @@ import { AGENT_CONFIG } from '../config/agent-config.js';
 import { buildSystemPrompt } from '../config/system-prompt.js';
 import { WORKFLOW_STEPS } from '../config/workflow-steps.js';
 import { InputValidator } from './input-validator.js';
-import { initDb, saveTranscript } from '../database/db.js';
+import { initDb, saveTranscript, storeMemory, getMemory, deleteMemory } from '../database/db.js';
 
 dotenv.config();
 
 // Initialize the local SQLite database
 initDb();
+
+// ── Define Database Tools ──────────────────────────────────────────────────
+import { z } from 'zod';
+import { Tool } from '@livekit/agents';
+
+const storeMemoryTool = new Tool(
+  {
+    name: 'store_memory',
+    description: 'Save user preferences, history, facts, or any context you need to remember for later. It is a key-value store. This overwrites any existing value for the key.',
+    parameters: z.object({
+      key: z.string().describe('The name of the memory, e.g. "user_name" or "dietary_restrictions"'),
+      value: z.string().describe('The value to store for this memory key'),
+    }),
+  },
+  async ({ key, value }: { key: string; value: string }) => {
+    const success = storeMemory(key, value);
+    return success ? \`Successfully stored memory '\${key}' as '\${value}'\` : \`Failed to store memory '\${key}'\`;
+  }
+);
+
+const getMemoryTool = new Tool(
+  {
+    name: 'get_memory',
+    description: 'Retrieve a previously stored memory by its key.',
+    parameters: z.object({
+      key: z.string().describe('The exact key used when storing the memory'),
+    }),
+  },
+  async ({ key }: { key: string }) => {
+    const value = getMemory(key);
+    return value !== null ? \`Memory '\${key}' = \${value}\` : \`Memory '\${key}' not found\`;
+  }
+);
+
+const deleteMemoryTool = new Tool(
+  {
+    name: 'delete_memory',
+    description: 'Delete a previously stored memory by its key if it is no longer relevant.',
+    parameters: z.object({
+      key: z.string().describe('The exact key to delete'),
+    }),
+  },
+  async ({ key }: { key: string }) => {
+    const success = deleteMemory(key);
+    return success ? \`Successfully deleted memory '\${key}'\` : \`Memory '\${key}' not found or failed to delete\`;
+  }
+);
 
 export default defineAgent({
   entry: async (ctx: JobContext) => {
@@ -469,6 +556,11 @@ export default defineAgent({
       llm: llmInstance,
       tts: ttsInstance,
       instructions: systemPrompt,
+      fncCtx: {
+        get_memory: getMemoryTool,
+        store_memory: storeMemoryTool,
+        delete_memory: deleteMemoryTool,
+      } as any,
     });
 
     const session = new voice.AgentSession({
@@ -476,6 +568,11 @@ export default defineAgent({
       stt: sttInstance,
       llm: llmInstance,
       tts: ttsInstance,
+      fncCtx: {
+        get_memory: getMemoryTool,
+        store_memory: storeMemoryTool,
+        delete_memory: deleteMemoryTool,
+      } as any,
     });
 
     // ── Barge-in noise gate ───────────────────────────────────────────────────
