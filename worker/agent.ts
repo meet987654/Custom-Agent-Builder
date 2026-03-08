@@ -847,7 +847,7 @@ export default defineAgent({
 // ─── Worker startup ───────────────────────────────────────────────────────────
 
 cli.runApp(new WorkerOptions({
-    agent: fileURLToPath(import.meta.url),
+    agent: __filename,
     initializeProcessTimeout: 60_000, // 60 s — tsx startup is slow
     port: parseInt(process.env.PORT || '8081', 10),
     host: '0.0.0.0',
