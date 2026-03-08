@@ -84,5 +84,11 @@ export async function GET(req: NextRequest) {
 
     const token = await at.toJwt();
 
+    // 4. Wake up the deployed Render worker (so it doesn't sleep)
+    // Render free-tier instances sleep after 15 minutes of HTTP inactivity.
+    // Pinging it here ensures it wakes up before or as the user connects.
+    const workerUrl = process.env.NEXT_PUBLIC_WORKER_URL || 'https://voice-agent-worker-mr0v.onrender.com';
+    fetch(workerUrl).catch(e => console.error("Worker wake-up ping error:", e));
+
     return NextResponse.json({ token });
 }
