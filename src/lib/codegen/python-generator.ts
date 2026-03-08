@@ -44,6 +44,7 @@ ${agent.config.llm?.provider === 'gemini' ? 'livekit-plugins-google>=1.0.0  # LL
 ${agent.config.tts?.provider === 'cartesia' ? 'livekit-plugins-cartesia>=1.0.0  # TTS Provider' : ''}
 ${agent.config.tts?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''}
 httpx>=0.27.0
+aiofiles>=23.2.1
 `;
 
     // --- .env.example ---
@@ -205,6 +206,62 @@ def build_system_prompt(current_step_index: int, current_step_name: str, total_s
 """
 `;
 
+    // --- database/db.py ---
+    fileMap[`${dir}/database/db.py`] = `import sqlite3
+import os
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "agent_data.db")
+
+def init_db():
+    """Initializes the SQLite database with the necessary tables."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Create a table for conversation transcripts
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transcripts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    speaker TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create a table for extracted user facts or memories
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.commit()
+            logger.info("Database initialized successfully at agent_data.db")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
+def save_transcript(session_id: str, speaker: str, text: str):
+    """Saves a single transcript line to the database."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO transcripts (session_id, speaker, text) VALUES (?, ?, ?)",
+                (session_id, speaker, text)
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save transcript: {e}")
+`;
+
     // --- agent/input_validator.py ---
     fileMap[`${dir}/agent/input_validator.py`] = `"""
 input_validator.py
@@ -347,10 +404,14 @@ from config.agent_config import AGENT_CONFIG
 from config.system_prompt import build_system_prompt
 from config.workflow_steps import WORKFLOW_STEPS
 from agent.input_validator import InputValidator
+from database.db import init_db, save_transcript
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# Initialize local SQLite database
+init_db()
 
 
 async def entrypoint(ctx: JobContext):
@@ -455,6 +516,13 @@ async def entrypoint(ctx: JobContext):
             return
 
         logger.info(f'[VALIDATOR] ✅ Valid: "{transcript[:60]}"')
+        save_transcript(ctx.room.name, "user", transcript)
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech_committed(event):
+        transcript = getattr(event, "transcript", "") or getattr(event, "text", "")
+        if transcript:
+            save_transcript(ctx.room.name, "agent", transcript)
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("[AGENT] 🎙️  Agent is live and listening!")

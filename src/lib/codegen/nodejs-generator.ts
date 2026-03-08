@@ -56,11 +56,13 @@ export function generateNodeProject(agent: AgentConfig): FileMap {
       ...(agent.config.tts?.provider === 'openai' && { "@livekit/agents-plugin-openai": "^1.0.44" }),
       ...(agent.config.tts?.provider === 'elevenlabs' && { "@livekit/agents-plugin-elevenlabs": "^1.0.44" }),
       "dotenv": "^16.4.0",
+      "better-sqlite3": "^11.1.2"
     },
     devDependencies: {
       "typescript": "^5.5.0",
       "tsx": "^4.19.0",
-      "@types/node": "^22.0.0"
+      "@types/node": "^22.0.0",
+      "@types/better-sqlite3": "^7.6.11"
     }
   }, null, 2);
 
@@ -221,6 +223,65 @@ export function buildSystemPrompt(
 }
 `;
 
+  // --- database/db.ts ---
+  fileMap[`${dir}/database/db.ts`] = `import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dbPath = path.join(__dirname, '..', 'agent_data.db');
+
+let db: Database.Database;
+
+export function initDb() {
+  try {
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL'); // Better performance/concurrency
+    
+    // Create transcripts table
+    db.exec(\`
+      CREATE TABLE IF NOT EXISTS transcripts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        speaker TEXT NOT NULL,
+        text TEXT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    \`);
+    
+    // Create memories table
+    db.exec(\`
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT UNIQUE NOT NULL,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    \`);
+    
+    console.log('[DATABASE] Initialized successfully at agent_data.db');
+  } catch (error) {
+    console.error('[DATABASE] Failed to initialize database:', error);
+  }
+}
+
+export function saveTranscript(sessionId: string, speaker: string, text: string) {
+  if (!db) return;
+  try {
+    const stmt = db.prepare('INSERT INTO transcripts (session_id, speaker, text) VALUES (?, ?, ?)');
+    stmt.run(sessionId, speaker, text);
+  } catch (error) {
+    console.error('[DATABASE] Failed to save transcript:', error);
+  }
+}
+
+export function getDb() {
+  if (!db) initDb();
+  return db;
+}
+`;
+
   // --- agent/input-validator.ts ---
   fileMap[`${dir}/agent/input-validator.ts`] = `/**
  * input-validator.ts
@@ -356,8 +417,12 @@ import { AGENT_CONFIG } from '../config/agent-config.js';
 import { buildSystemPrompt } from '../config/system-prompt.js';
 import { WORKFLOW_STEPS } from '../config/workflow-steps.js';
 import { InputValidator } from './input-validator.js';
+import { initDb, saveTranscript } from '../database/db.js';
 
 dotenv.config();
+
+// Initialize the local SQLite database
+initDb();
 
 export default defineAgent({
   entry: async (ctx: JobContext) => {
@@ -466,6 +531,15 @@ export default defineAgent({
       }
 
       console.log(\`[VALIDATOR] ✅ Valid: "\${transcript.slice(0, 60)}"\`);
+      if (ctx.room) saveTranscript(ctx.room.name, 'user', transcript);
+    });
+
+    // ── Save Agent Speech ─────────────────────────────────────────────────────
+    (session as any).on?.('agent_speech_committed', (event: any) => {
+      const transcript = event?.transcript ?? event?.text ?? '';
+      if (transcript && ctx.room) {
+        saveTranscript(ctx.room.name, 'agent', transcript);
+      }
     });
 
     await session.start({ agent: voiceAgent, room: ctx.room });
