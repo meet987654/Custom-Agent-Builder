@@ -6,13 +6,10 @@ import { generatePythonProject } from '@/lib/codegen/python-generator';
 import { AgentConfig } from '@/lib/codegen/types';
 import { PassThrough, Readable } from 'stream';
 
-// Helper to convert Node stream to Web Stream
-function nodeStreamToIterator(stream: Readable) {
-    return async function* () {
-        for await (const chunk of stream) {
-            yield chunk;
-        }
-    };
+async function* nodeStreamToIterator(stream: Readable) {
+    for await (const chunk of stream) {
+        yield chunk;
+    }
 }
 
 function iteratorToStream(iterator: any) {
