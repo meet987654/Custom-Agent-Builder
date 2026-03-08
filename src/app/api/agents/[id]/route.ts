@@ -71,3 +71,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ agent: updatedAgent });
 }
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    const supabase = await createClient();
+    const { data: { session: _s } } = await supabase.auth.getSession(); const user = _s?.user ?? null;
+
+    if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { id } = await params;
+
+    // Validate agent ownership before deletion
+    const { data: existingAgent, error: fetchError } = await supabase
+        .from('agents')
+        .select('user_id')
+        .eq('id', id)
+        .single();
+
+    if (fetchError || !existingAgent) {
+        return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+    }
+
+    if (existingAgent.user_id !== user.id) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    const { error } = await supabase
+        .from('agents')
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+}

@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Download, MoreVertical, Copy, Play, Settings } from 'lucide-react';
+import { Download, MoreVertical, Copy, Play, Settings, Trash2 } from 'lucide-react';
 import { DownloadCodeModal } from '@/components/DownloadCodeModal';
 import SignOutButton from '@/components/SignOutButton';
 
@@ -58,6 +58,21 @@ export default function DashboardPage() {
         }
     };
 
+    const handleDeleteAgent = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Are you sure you want to delete this agent? This action cannot be undone.')) return;
+
+        try {
+            const res = await fetch(`/api/agents/${id}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) throw new Error('Failed to delete agent');
+            setAgents((prev) => prev.filter((a) => a.id !== id));
+        } catch (err: any) {
+            alert(err.message);
+        }
+    };
+
     if (loading) return <div className="flex h-screen items-center justify-center bg-gray-950 text-white">Loading...</div>;
 
     return (
@@ -95,6 +110,13 @@ export default function DashboardPage() {
                                             title="Download Code"
                                         >
                                             <Download size={18} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => handleDeleteAgent(agent.id, e)}
+                                            className="rounded p-2 text-gray-500 hover:bg-red-900/40 hover:text-red-500 transition-colors"
+                                            title="Delete Agent"
+                                        >
+                                            <Trash2 size={18} />
                                         </button>
                                     </div>
                                 </div>

@@ -6,7 +6,7 @@ import * as z from 'zod';
 import { useState, useEffect } from 'react';
 import { ApiKeyInput } from '@/components/ApiKeyInput';
 import {
-    ChevronDown, MessageSquare, Mic, Volume2, Save, Play, RefreshCcw, Lock, X, Download, ArrowLeft
+    ChevronDown, MessageSquare, Mic, Volume2, Save, Play, RefreshCcw, Lock, X, Download, ArrowLeft, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DownloadCodeModal } from '@/components/DownloadCodeModal';
@@ -66,6 +66,25 @@ type FormValues = z.infer<typeof formSchema>;
 export default function AgentEditForm({ agent, configuredProviders }: { agent: any, configuredProviders: string[] }) {
     const router = useRouter();
     const [isSaving, setIsSaving] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        if (!confirm('Are you sure you want to delete this agent? This action cannot be undone.')) return;
+
+        setIsDeleting(true);
+        try {
+            const res = await fetch(`/api/agents/${agent.id}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) throw new Error('Failed to delete agent');
+            router.push('/dashboard');
+            router.refresh();
+        } catch (err: any) {
+            alert(err.message);
+            setIsDeleting(false);
+        }
+    };
+
     const [localConfiguredProviders, setLocalConfiguredProviders] = useState<string[]>(configuredProviders);
 
     useEffect(() => {
@@ -217,6 +236,15 @@ export default function AgentEditForm({ agent, configuredProviders }: { agent: a
                         </div>
                     </div>
                     <div className="flex gap-2">
+                        <button
+                            type="button"
+                            onClick={handleDelete}
+                            disabled={isDeleting}
+                            className="flex items-center gap-2 rounded border border-red-900/50 bg-red-900/10 px-4 py-2 text-sm text-red-500 hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                        >
+                            <Trash2 size={16} />
+                            {isDeleting ? 'Deleting...' : 'Delete'}
+                        </button>
                         <button
                             type="button"
                             onClick={() => setShowDownloadModal(true)}
