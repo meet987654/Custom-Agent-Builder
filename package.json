@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "tsc -p tsconfig.worker.json",
     "dev": "next dev",
     "build": "next build && tsc -p tsconfig.worker.json",
     "start": "next start",
