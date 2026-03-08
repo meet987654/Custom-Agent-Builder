@@ -1,3 +1,8 @@
+// ─── Optimize ONNX Threads for Small Containers (Render Free Tier) ───
+// These must be set before any ONNX libraries are loaded.
+process.env.OMP_NUM_THREADS = '1';
+process.env.ONNXRUNTIME_NUM_THREADS = '1';
+
 import { cli, defineAgent, JobContext, WorkerOptions, stt, llm, tts, voice } from '@livekit/agents';
 import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as openaiPlugin from '@livekit/agents-plugin-openai';
