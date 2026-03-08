@@ -341,7 +341,11 @@ export class InputValidator {
     ? `new cartesia.TTS({ apiKey: process.env.CARTESIA_API_KEY!, voice: AGENT_CONFIG.tts.voice })`
     : `new openai.TTS({ apiKey: process.env.OPENAI_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`;
 
-  fileMap[`${dir}/agent/voice-agent.ts`] = `import { cli, defineAgent, JobContext, WorkerOptions, voice } from '@livekit/agents';
+  fileMap[`${dir}/agent/voice-agent.ts`] = `// ─── Optimize ONNX Threads for Small Containers ───
+process.env.OMP_NUM_THREADS = '1';
+process.env.ONNXRUNTIME_NUM_THREADS = '1';
+
+import { cli, defineAgent, JobContext, WorkerOptions, voice } from '@livekit/agents';
 import * as silero from '@livekit/agents-plugin-silero';
 ${sttProviderImport}
 ${llmProviderImport !== sttProviderImport ? llmProviderImport : ''}
