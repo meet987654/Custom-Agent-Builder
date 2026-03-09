@@ -37,8 +37,10 @@ ${agent.config.stt?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''
 ${agent.config.llm?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''}
 ${agent.config.llm?.provider === 'gemini' ? 'livekit-plugins-google>=1.0.0  # LLM Provider' : ''}
 ${agent.config.tts?.provider === 'cartesia' ? 'livekit-plugins-cartesia>=1.0.0  # TTS Provider' : ''}
+${agent.config.tts?.provider === 'elevenlabs' ? 'livekit-plugins-elevenlabs>=1.0.0' : ''}
 ${agent.config.tts?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''}
 httpx>=0.27.0
+aiofiles>=23.2.1
 `;
     // --- .env.example ---
     fileMap[`${dir}/.env.example`] = `LIVEKIT_URL=wss://your-project.livekit.cloud
@@ -193,6 +195,99 @@ def build_system_prompt(current_step_index: int, current_step_name: str, total_s
 4. Keep responses to 1-3 sentences. Do not use lists or bullet points.
 """
 `;
+    // --- database/db.py ---
+    fileMap[`${dir}/database/db.py`] = `import sqlite3
+import os
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "agent_data.db")
+
+def init_db():
+    """Initializes the SQLite database with the necessary tables."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Create a table for conversation transcripts
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS transcripts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    speaker TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create a table for extracted user facts or memories
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.commit()
+            logger.info("Database initialized successfully at agent_data.db")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
+def save_transcript(session_id: str, speaker: str, text: str):
+    """Saves a single transcript line to the database."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO transcripts (session_id, speaker, text) VALUES (?, ?, ?)",
+                (session_id, speaker, text)
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save transcript: {e}")
+
+def store_memory(key: str, value: str) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO memories (key, value) 
+                VALUES (?, ?) 
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+            """, (key, value))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store memory: {e}")
+        return False
+
+def get_memory(key: str) -> str | None:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM memories WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Failed to get memory: {e}")
+        return None
+
+def delete_memory(key: str) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM memories WHERE key = ?", (key,))
+            changes = conn.total_changes
+            conn.commit()
+            return changes > 0
+    except Exception as e:
+        logger.error(f"Failed to delete memory: {e}")
+        return False
+`;
     // --- agent/input_validator.py ---
     fileMap[`${dir}/agent/input_validator.py`] = `"""
 input_validator.py
@@ -306,13 +401,16 @@ class InputValidator:
         : `openai.LLM(model=AGENT_CONFIG.llm.model)`;
     const ttsInit = agent.config.tts?.provider === 'cartesia'
         ? `cartesia.TTS(voice=AGENT_CONFIG.tts.voice)`
-        : `openai.TTS(voice=AGENT_CONFIG.tts.voice)`;
+        : agent.config.tts?.provider === 'elevenlabs'
+            ? `elevenlabs.TTS(voice=AGENT_CONFIG.tts.voice)`
+            : `openai.TTS(voice=AGENT_CONFIG.tts.voice)`;
     const pluginImports = [
         agent.config.stt?.provider === 'deepgram' ? 'from livekit.plugins import deepgram' : '',
         agent.config.stt?.provider === 'openai' || agent.config.llm?.provider === 'openai' || agent.config.tts?.provider === 'openai'
             ? 'from livekit.plugins import openai' : '',
         agent.config.llm?.provider === 'gemini' ? 'from livekit.plugins import google' : '',
         agent.config.tts?.provider === 'cartesia' ? 'from livekit.plugins import cartesia' : '',
+        agent.config.tts?.provider === 'elevenlabs' ? 'from livekit.plugins import elevenlabs' : '',
     ].filter(Boolean).join('\n');
     fileMap[`${dir}/agent/voice_agent.py`] = `"""
 voice_agent.py
@@ -323,18 +421,50 @@ applies barge-in noise gate, and runs pre-LLM input validation on every utteranc
 import asyncio
 import logging
 import time
-from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, voice
+from typing import Annotated
+from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, voice, llm
 from livekit.plugins import silero
 ${pluginImports}
 from config.agent_config import AGENT_CONFIG
 from config.system_prompt import build_system_prompt
 from config.workflow_steps import WORKFLOW_STEPS
 from agent.input_validator import InputValidator
+from database.db import init_db, save_transcript, store_memory, get_memory, delete_memory
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Initialize local SQLite database
+init_db()
+
+# ── Define Database Tools ────────────────────────────────────────────────────
+class DBTools(llm.FunctionContext):
+    
+    @llm.ai_callable(desc="Save user preferences, history, facts, or any context you need to remember for later. It is a key-value store. This overwrites any existing value for the key.")
+    async def store_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The name of the memory, e.g. "user_name" or "dietary_restrictions"')],
+        value: Annotated[str, llm.TypeInfo(desc='The value to store for this memory key')]
+    ):
+        success = store_memory(key, value)
+        return f"Successfully stored memory '{key}' as '{value}'" if success else f"Failed to store memory '{key}'"
+
+    @llm.ai_callable(desc="Retrieve a previously stored memory by its key.")
+    async def get_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The exact key used when storing the memory')]
+    ):
+        value = get_memory(key)
+        return f"Memory '{key}' = {value}" if value is not None else f"Memory '{key}' not found"
+
+    @llm.ai_callable(desc="Delete a previously stored memory by its key if it is no longer relevant.")
+    async def delete_memory(
+        self,
+        key: Annotated[str, llm.TypeInfo(desc='The exact key to delete')]
+    ):
+        success = delete_memory(key)
+        return f"Successfully deleted memory '{key}'" if success else f"Memory '{key}' not found or failed to delete"
 
 async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -372,6 +502,8 @@ async def entrypoint(ctx: JobContext):
 
     # ── Input Validator (pre-LLM gate) ───────────────────────────────────────
     validator = InputValidator()
+    
+    fnc_ctx = DBTools()
 
     agent = voice.Agent(
         vad=vad_plugin,
@@ -379,6 +511,7 @@ async def entrypoint(ctx: JobContext):
         llm=llm_plugin,
         tts=tts_plugin,
         instructions=system_prompt,
+        fnc_ctx=fnc_ctx,
     )
 
     session = voice.AgentSession(
@@ -386,6 +519,7 @@ async def entrypoint(ctx: JobContext):
         stt=stt_plugin,
         llm=llm_plugin,
         tts=tts_plugin,
+        fnc_ctx=fnc_ctx,
     )
 
     # ── Barge-in noise gate ───────────────────────────────────────────────────
@@ -438,6 +572,13 @@ async def entrypoint(ctx: JobContext):
             return
 
         logger.info(f'[VALIDATOR] ✅ Valid: "{transcript[:60]}"')
+        save_transcript(ctx.room.name, "user", transcript)
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech_committed(event):
+        transcript = getattr(event, "transcript", "") or getattr(event, "text", "")
+        if transcript:
+            save_transcript(ctx.room.name, "agent", transcript)
 
     await session.start(agent=agent, room=ctx.room)
     logger.info("[AGENT] 🎙️  Agent is live and listening!")

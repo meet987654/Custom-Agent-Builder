@@ -42,6 +42,7 @@ ${agent.config.stt?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''
 ${agent.config.llm?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''}
 ${agent.config.llm?.provider === 'gemini' ? 'livekit-plugins-google>=1.0.0  # LLM Provider' : ''}
 ${agent.config.tts?.provider === 'cartesia' ? 'livekit-plugins-cartesia>=1.0.0  # TTS Provider' : ''}
+${agent.config.tts?.provider === 'elevenlabs' ? 'livekit-plugins-elevenlabs>=1.0.0' : ''}
 ${agent.config.tts?.provider === 'openai' ? 'livekit-plugins-openai>=1.0.0' : ''}
 httpx>=0.27.0
 aiofiles>=23.2.1
@@ -416,7 +417,9 @@ class InputValidator:
 
     const ttsInit = agent.config.tts?.provider === 'cartesia'
         ? `cartesia.TTS(voice=AGENT_CONFIG.tts.voice)`
-        : `openai.TTS(voice=AGENT_CONFIG.tts.voice)`;
+        : agent.config.tts?.provider === 'elevenlabs'
+            ? `elevenlabs.TTS(voice=AGENT_CONFIG.tts.voice)`
+            : `openai.TTS(voice=AGENT_CONFIG.tts.voice)`;
 
     const pluginImports = [
         agent.config.stt?.provider === 'deepgram' ? 'from livekit.plugins import deepgram' : '',
@@ -424,6 +427,7 @@ class InputValidator:
             ? 'from livekit.plugins import openai' : '',
         agent.config.llm?.provider === 'gemini' ? 'from livekit.plugins import google' : '',
         agent.config.tts?.provider === 'cartesia' ? 'from livekit.plugins import cartesia' : '',
+        agent.config.tts?.provider === 'elevenlabs' ? 'from livekit.plugins import elevenlabs' : '',
     ].filter(Boolean).join('\n');
 
     fileMap[`${dir}/agent/voice_agent.py`] = `"""

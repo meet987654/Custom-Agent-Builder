@@ -11,7 +11,8 @@ import {
 import { useRouter } from 'next/navigation';
 import { DownloadCodeModal } from '@/components/DownloadCodeModal';
 import { VALID_MODELS, DEFAULT_MODEL } from '@/lib/constants/providers';
-
+import * as Tabs from '@radix-ui/react-tabs';
+import WorkflowEditor from '@/features/workflow/components/WorkflowEditor';
 const stepSchema = z.object({
     name: z.string().min(1, 'Name required'),
     description: z.string().min(1, 'Description required'),
@@ -214,6 +215,30 @@ export default function AgentEditForm({ agent, configuredProviders }: { agent: a
         }
     }, [ttsVoice, setValue, form]);
 
+    const handleSyncFromCanvas = (nodes: any[]) => {
+        const newSteps = nodes.map(node => {
+            let desc = '';
+            if (node.type === 'speak') desc = (node.data.text as string) || 'Speak to user';
+            else if (node.type === 'decision') desc = (node.data.systemPrompt as string) || 'Make a decision';
+            else if (node.type === 'listen') desc = 'Wait and listen for user input';
+            else desc = `Execute ${node.type} workflow logic`;
+
+            return {
+                name: (node.data.label as string) || node.type || 'Unnamed Step',
+                description: desc,
+                prompt_addition: ''
+            };
+        });
+
+        setValue('config.workflow_steps', newSteps, { shouldDirty: true, shouldValidate: true });
+
+        // Use a slight timeout to let react-hook-form update its state before submitting
+        setTimeout(() => {
+            handleSubmit(onSubmit)();
+            alert("Canvas steps compiled and synced to the Configuration tab successfully! \n\nAgent has been saved.");
+        }, 100);
+    };
+
     return (
         <>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 pb-20">
@@ -272,264 +297,290 @@ export default function AgentEditForm({ agent, configuredProviders }: { agent: a
                     </div>
                 </div>
 
-                {/* Main Content Layout */}
-                <div className="grid gap-8 lg:grid-cols-3">
-                    {/* Left Column (Main Config) */}
-                    <div className="space-y-8 lg:col-span-2">
+                {/* Tabs Wrapper */}
+                <Tabs.Root defaultValue="settings" className="flex flex-col">
+                    <Tabs.List className="mb-6 flex gap-1 border-b border-gray-800">
+                        <Tabs.Trigger
+                            value="settings"
+                            className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 data-[state=active]:text-indigo-400 focus:outline-none transition-colors"
+                        >
+                            Configuration
+                        </Tabs.Trigger>
+                        <Tabs.Trigger
+                            value="canvas"
+                            className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 data-[state=active]:text-indigo-400 focus:outline-none transition-colors flex items-center gap-2"
+                        >
+                            Workflow Studio <span className="bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">Beta</span>
+                        </Tabs.Trigger>
+                    </Tabs.List>
 
-                        {/* Identity & Language */}
-                        <div className="rounded-lg bg-gray-900 p-6">
-                            <h2 className="mb-4 text-lg font-semibold text-white">Agent Setup</h2>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <div>
-                                    <label className="mb-1 block text-sm font-medium text-gray-400">Description</label>
-                                    <input {...register('description')} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-white" />
-                                </div>
-                                <div>
-                                    <label className="mb-1 block text-sm font-medium text-gray-400">Language</label>
-                                    <select {...register('config.language')} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-white">
-                                        <option value="en">English (Default)</option>
-                                        <option value="hi">Hindi</option>
-                                        <option value="gu">Gujarati</option>
-                                        <option value="es">Spanish</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
+                    <Tabs.Content value="settings" className="outline-none">
+                        {/* Main Content Layout */}
+                        <div className="grid gap-8 lg:grid-cols-3">
+                            {/* Left Column (Main Config) */}
+                            <div className="space-y-8 lg:col-span-2">
 
-                        {/* System Prompt */}
-                        <div className="rounded-lg bg-gray-900 p-6">
-                            <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white">
-                                <MessageSquare size={18} /> Conversation Prompt
-                            </h2>
-                            <textarea
-                                {...register('config.system_prompt')}
-                                rows={10}
-                                className="w-full rounded border border-gray-700 bg-gray-800 p-4 text-sm font-mono text-gray-300 focus:border-indigo-500 focus:outline-none"
-                            />
-
-                            <div className="mt-4 rounded border border-gray-700 bg-gray-950 p-4">
-                                <details>
-                                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-gray-500">
-                                        Behavior Rules (Always Active)
-                                    </summary>
-                                    <ul className="mt-2 list-decimal space-y-1 pl-4 text-xs text-gray-400">
-                                        <li>Only state facts explicitly given in prompt or by user.</li>
-                                        <li>If unsure, say "I don't have that information".</li>
-                                        <li>Only confirm actions after success.</li>
-                                        <li>Ask clarifying questions for ambiguous input.</li>
-                                        <li>Keep responses to 1-3 sentences.</li>
-                                    </ul>
-                                </details>
-                            </div>
-                        </div>
-
-                        {/* Workflow Steps */}
-                        <div className="rounded-lg bg-gray-900 p-6">
-                            <h2 className="mb-4 text-lg font-semibold text-white">Workflow Steps</h2>
-                            <div className="space-y-4">
-                                {fields.map((field, index) => (
-                                    <div key={field.id} className="relative rounded-md border border-gray-800 bg-gray-950 p-4 transition-colors hover:border-gray-700">
-                                        <div className="mb-2 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-900/50 text-xs font-bold text-indigo-400">
-                                                    {index + 1}
-                                                </span>
-                                                <h3 className="text-sm font-medium text-white">Step {index + 1}</h3>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => remove(index)}
-                                                className="rounded p-1 text-gray-500 hover:bg-red-900/20 hover:text-red-400"
-                                            >
-                                                <X size={16} />
-                                            </button>
+                                {/* Identity & Language */}
+                                <div className="rounded-lg bg-gray-900 p-6">
+                                    <h2 className="mb-4 text-lg font-semibold text-white">Agent Setup</h2>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-gray-400">Description</label>
+                                            <input {...register('description')} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-white" />
                                         </div>
-
-                                        <div className="space-y-3 pl-8">
-                                            <div>
-                                                <label className="mb-1 block text-xs font-medium text-gray-500">Name</label>
-                                                <input
-                                                    {...register(`config.workflow_steps.${index}.name`)}
-                                                    placeholder="e.g. Greeting"
-                                                    className="w-full rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
-                                                />
-                                                {errors.config?.workflow_steps?.[index]?.name && (
-                                                    <p className="mt-1 text-xs text-red-500">{errors.config.workflow_steps[index]?.name?.message}</p>
-                                                )}
-                                            </div>
-                                            <div>
-                                                <label className="mb-1 block text-xs font-medium text-gray-500">Description</label>
-                                                <textarea
-                                                    {...register(`config.workflow_steps.${index}.description`)}
-                                                    placeholder="Describe what the agent should do in this step..."
-                                                    rows={2}
-                                                    className="w-full rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
-                                                />
-                                                {errors.config?.workflow_steps?.[index]?.description && (
-                                                    <p className="mt-1 text-xs text-red-500">{errors.config.workflow_steps[index]?.description?.message}</p>
-                                                )}
-                                            </div>
+                                        <div>
+                                            <label className="mb-1 block text-sm font-medium text-gray-400">Language</label>
+                                            <select {...register('config.language')} className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-white">
+                                                <option value="en">English (Default)</option>
+                                                <option value="hi">Hindi</option>
+                                                <option value="gu">Gujarati</option>
+                                                <option value="es">Spanish</option>
+                                            </select>
                                         </div>
                                     </div>
-                                ))}
-
-                                <button
-                                    type="button"
-                                    onClick={() => append({ name: '', description: '', prompt_addition: '' })}
-                                    className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-700 bg-gray-900/50 py-3 text-sm font-medium text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-800 hover:text-white"
-                                >
-                                    <span>+ Add Workflow Step</span>
-                                </button>
-                            </div>
-                        </div>
-
-                    </div>
-
-                    {/* Right Column (Providers & Config) */}
-                    <div className="space-y-8">
-
-                        {/* STT/LLM/TTS Providers */}
-                        <div className="rounded-lg bg-gray-900 p-6">
-                            <h2 className="mb-4 text-lg font-semibold text-white">Voice & Intelligence</h2>
-
-                            {/* STT */}
-                            <div className="mb-6">
-                                <div className="mb-2 flex items-center justify-between">
-                                    <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><Mic size={14} /> STT Provider</label>
                                 </div>
-                                <select {...register('config.stt.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    <option value="deepgram">Deepgram</option>
-                                    <option value="assemblyai">AssemblyAI</option>
-                                </select>
-                                <select {...register('config.stt.model')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    {sttProvider === 'deepgram' && (<>
-                                        <option value="nova-3">Nova-3 (Latest, Best)</option>
-                                        <option value="nova-2">Nova-2</option>
-                                        <option value="nova-2-general">Nova-2 General</option>
-                                    </>)}
-                                    {sttProvider === 'assemblyai' && (<>
-                                        <option value="best">Best</option>
-                                        <option value="nano">Nano (Fast)</option>
-                                    </>)}
-                                </select>
-                                <ApiKeyInput
-                                    key={`stt-${sttProvider}`}
-                                    provider={sttProvider}
-                                    initialHasKey={localConfiguredProviders.includes(sttProvider)}
-                                />
-                            </div>
 
-                            {/* LLM */}
-                            <div className="mb-6">
-                                <div className="mb-2 flex items-center justify-between">
-                                    <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><RefreshCcw size={14} /> LLM Provider</label>
-                                </div>
-                                <select {...register('config.llm.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    <option value="groq">Groq (Fastest)</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="gemini">Google Gemini</option>
-                                </select>
-                                <select {...register('config.llm.model')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    {llmProvider === 'groq' && (<>
-                                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Best)</option>
-                                        <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fastest)</option>
-                                        <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                        <option value="gemma2-9b-it">Gemma 2 9B</option>
-                                    </>)}
-                                    {llmProvider === 'openai' && (<>
-                                        <option value="gpt-4o-mini">GPT-4o Mini (Fast)</option>
-                                        <option value="gpt-4o">GPT-4o</option>
-                                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                    </>)}
-                                    {llmProvider === 'gemini' && (<>
-                                        <option value="gemini-2.0-flash-001">Gemini 2.0 Flash (Best)</option>
-                                        <option value="gemini-2.5-flash-preview-04-17">Gemini 2.5 Flash Preview</option>
-                                        <option value="gemini-2.5-pro-preview-05-06">Gemini 2.5 Pro Preview</option>
-                                        <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                    </>)}
-                                </select>
-                                <ApiKeyInput
-                                    key={`llm-${llmProvider}`}
-                                    provider={llmProvider}
-                                    initialHasKey={localConfiguredProviders.includes(llmProvider)}
-                                />
-                            </div>
-
-                            {/* TTS */}
-                            <div className="mb-6">
-                                <div className="mb-2 flex items-center justify-between">
-                                    <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><Volume2 size={14} /> TTS Provider</label>
-                                </div>
-                                <select {...register('config.tts.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    <option value="cartesia">Cartesia</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="elevenlabs">ElevenLabs</option>
-                                </select>
-                                <select {...register('config.tts.voice')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                    {ttsProvider === 'cartesia' && (<>
-                                        <option value="79a125e8-cd45-4c13-8a67-188112f4dd22">British Lady</option>
-                                        <option value="a0e99841-438c-4a64-b679-ae501e7d6091">Barbershop Man</option>
-                                        <option value="b7d50908-b17c-442d-ad8d-810c63997ed9">California Girl</option>
-                                        <option value="5c42302c-194b-4d0c-ba1a-8cb485c84ab9">Reading Man</option>
-                                        <option value="794f9389-aac1-45b6-b726-9d9369183238">Newsman (Default)</option>
-                                    </>)}
-                                    {ttsProvider === 'openai' && (<>
-                                        <option value="alloy">Alloy</option>
-                                        <option value="echo">Echo</option>
-                                        <option value="fable">Fable</option>
-                                        <option value="onyx">Onyx</option>
-                                        <option value="nova">Nova</option>
-                                        <option value="shimmer">Shimmer</option>
-                                    </>)}
-                                    {ttsProvider === 'elevenlabs' && (<>
-                                        <option value="21m00Tcm4TlvDq8ikWAM">Rachel</option>
-                                        <option value="AZnzlk1XvdvUeBnXmlld">Domi</option>
-                                        <option value="EXAVITQu4vr4xnSDxMaL">Bella</option>
-                                        <option value="ErXwobaYiN019PkySvjV">Antoni</option>
-                                    </>)}
-                                </select>
-
-                                <div className="mt-4 mb-2">
-                                    <label className="text-sm font-medium text-gray-300 flex items-center gap-2 mb-2">
-                                        Agent Gender <span className="text-xs text-gray-500 font-normal">(affects grammar in Hindi, Gujarati, etc.)</span>
-                                    </label>
-                                    <select {...register('config.voice_gender')} className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
-                                        <option value="neutral">Neutral (Default)</option>
-                                        <option value="female">Female</option>
-                                        <option value="male">Male</option>
-                                    </select>
-                                </div>
-                                <ApiKeyInput
-                                    key={`tts-${ttsProvider}`}
-                                    provider={ttsProvider}
-                                    initialHasKey={localConfiguredProviders.includes(ttsProvider)}
-                                />
-                            </div>
-
-                        </div>
-
-                        {/* Silence & VAD */}
-                        <div className="rounded-lg bg-gray-900 p-6">
-                            <h2 className="mb-4 text-lg font-semibold text-white">Silence & VAD</h2>
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <label className="text-sm text-gray-400">Barge-in (Interrupt)</label>
-                                    <input type="checkbox" {...register('config.vad.barge_in')} />
-                                </div>
-                                <div>
-                                    <label className="text-sm text-gray-400">Silence Timeout (ms)</label>
-                                    <input
-                                        type="number"
-                                        {...register('config.vad.silence_timeout_ms', { valueAsNumber: true })}
-                                        className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white"
+                                {/* System Prompt */}
+                                <div className="rounded-lg bg-gray-900 p-6">
+                                    <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white">
+                                        <MessageSquare size={18} /> Conversation Prompt
+                                    </h2>
+                                    <textarea
+                                        {...register('config.system_prompt')}
+                                        rows={10}
+                                        className="w-full rounded border border-gray-700 bg-gray-800 p-4 text-sm font-mono text-gray-300 focus:border-indigo-500 focus:outline-none"
                                     />
+
+                                    <div className="mt-4 rounded border border-gray-700 bg-gray-950 p-4">
+                                        <details>
+                                            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-gray-500">
+                                                Behavior Rules (Always Active)
+                                            </summary>
+                                            <ul className="mt-2 list-decimal space-y-1 pl-4 text-xs text-gray-400">
+                                                <li>Only state facts explicitly given in prompt or by user.</li>
+                                                <li>If unsure, say "I don't have that information".</li>
+                                                <li>Only confirm actions after success.</li>
+                                                <li>Ask clarifying questions for ambiguous input.</li>
+                                                <li>Keep responses to 1-3 sentences.</li>
+                                            </ul>
+                                        </details>
+                                    </div>
                                 </div>
+
+                                {/* Workflow Steps */}
+                                <div className="rounded-lg bg-gray-900 p-6">
+                                    <h2 className="mb-4 text-lg font-semibold text-white">Workflow Steps</h2>
+                                    <div className="space-y-4">
+                                        {fields.map((field, index) => (
+                                            <div key={field.id} className="relative rounded-md border border-gray-800 bg-gray-950 p-4 transition-colors hover:border-gray-700">
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-900/50 text-xs font-bold text-indigo-400">
+                                                            {index + 1}
+                                                        </span>
+                                                        <h3 className="text-sm font-medium text-white">Step {index + 1}</h3>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => remove(index)}
+                                                        className="rounded p-1 text-gray-500 hover:bg-red-900/20 hover:text-red-400"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+
+                                                <div className="space-y-3 pl-8">
+                                                    <div>
+                                                        <label className="mb-1 block text-xs font-medium text-gray-500">Name</label>
+                                                        <input
+                                                            {...register(`config.workflow_steps.${index}.name`)}
+                                                            placeholder="e.g. Greeting"
+                                                            className="w-full rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
+                                                        />
+                                                        {errors.config?.workflow_steps?.[index]?.name && (
+                                                            <p className="mt-1 text-xs text-red-500">{errors.config.workflow_steps[index]?.name?.message}</p>
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <label className="mb-1 block text-xs font-medium text-gray-500">Description</label>
+                                                        <textarea
+                                                            {...register(`config.workflow_steps.${index}.description`)}
+                                                            placeholder="Describe what the agent should do in this step..."
+                                                            rows={2}
+                                                            className="w-full rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none"
+                                                        />
+                                                        {errors.config?.workflow_steps?.[index]?.description && (
+                                                            <p className="mt-1 text-xs text-red-500">{errors.config.workflow_steps[index]?.description?.message}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        <button
+                                            type="button"
+                                            onClick={() => append({ name: '', description: '', prompt_addition: '' })}
+                                            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gray-700 bg-gray-900/50 py-3 text-sm font-medium text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-800 hover:text-white"
+                                        >
+                                            <span>+ Add Workflow Step</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            {/* Right Column (Providers & Config) */}
+                            <div className="space-y-8">
+
+                                {/* STT/LLM/TTS Providers */}
+                                <div className="rounded-lg bg-gray-900 p-6">
+                                    <h2 className="mb-4 text-lg font-semibold text-white">Voice & Intelligence</h2>
+
+                                    {/* STT */}
+                                    <div className="mb-6">
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><Mic size={14} /> STT Provider</label>
+                                        </div>
+                                        <select {...register('config.stt.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            <option value="deepgram">Deepgram</option>
+                                            <option value="assemblyai">AssemblyAI</option>
+                                        </select>
+                                        <select {...register('config.stt.model')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            {sttProvider === 'deepgram' && (<>
+                                                <option value="nova-3">Nova-3 (Latest, Best)</option>
+                                                <option value="nova-2">Nova-2</option>
+                                                <option value="nova-2-general">Nova-2 General</option>
+                                            </>)}
+                                            {sttProvider === 'assemblyai' && (<>
+                                                <option value="best">Best</option>
+                                                <option value="nano">Nano (Fast)</option>
+                                            </>)}
+                                        </select>
+                                        <ApiKeyInput
+                                            key={`stt-${sttProvider}`}
+                                            provider={sttProvider}
+                                            initialHasKey={localConfiguredProviders.includes(sttProvider)}
+                                        />
+                                    </div>
+
+                                    {/* LLM */}
+                                    <div className="mb-6">
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><RefreshCcw size={14} /> LLM Provider</label>
+                                        </div>
+                                        <select {...register('config.llm.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            <option value="groq">Groq (Fastest)</option>
+                                            <option value="openai">OpenAI</option>
+                                            <option value="gemini">Google Gemini</option>
+                                        </select>
+                                        <select {...register('config.llm.model')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            {llmProvider === 'groq' && (<>
+                                                <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Best)</option>
+                                                <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fastest)</option>
+                                                <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                                <option value="gemma2-9b-it">Gemma 2 9B</option>
+                                            </>)}
+                                            {llmProvider === 'openai' && (<>
+                                                <option value="gpt-4o-mini">GPT-4o Mini (Fast)</option>
+                                                <option value="gpt-4o">GPT-4o</option>
+                                                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                            </>)}
+                                            {llmProvider === 'gemini' && (<>
+                                                <option value="gemini-2.0-flash-001">Gemini 2.0 Flash (Best)</option>
+                                                <option value="gemini-2.5-flash-preview-04-17">Gemini 2.5 Flash Preview</option>
+                                                <option value="gemini-2.5-pro-preview-05-06">Gemini 2.5 Pro Preview</option>
+                                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                            </>)}
+                                        </select>
+                                        <ApiKeyInput
+                                            key={`llm-${llmProvider}`}
+                                            provider={llmProvider}
+                                            initialHasKey={localConfiguredProviders.includes(llmProvider)}
+                                        />
+                                    </div>
+
+                                    {/* TTS */}
+                                    <div className="mb-6">
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <label className="text-sm font-medium text-gray-300 flex items-center gap-2"><Volume2 size={14} /> TTS Provider</label>
+                                        </div>
+                                        <select {...register('config.tts.provider')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            <option value="cartesia">Cartesia</option>
+                                            <option value="openai">OpenAI</option>
+                                            <option value="elevenlabs">ElevenLabs</option>
+                                        </select>
+                                        <select {...register('config.tts.voice')} className="mb-2 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                            {ttsProvider === 'cartesia' && (<>
+                                                <option value="79a125e8-cd45-4c13-8a67-188112f4dd22">British Lady</option>
+                                                <option value="a0e99841-438c-4a64-b679-ae501e7d6091">Barbershop Man</option>
+                                                <option value="b7d50908-b17c-442d-ad8d-810c63997ed9">California Girl</option>
+                                                <option value="5c42302c-194b-4d0c-ba1a-8cb485c84ab9">Reading Man</option>
+                                                <option value="794f9389-aac1-45b6-b726-9d9369183238">Newsman (Default)</option>
+                                            </>)}
+                                            {ttsProvider === 'openai' && (<>
+                                                <option value="alloy">Alloy</option>
+                                                <option value="echo">Echo</option>
+                                                <option value="fable">Fable</option>
+                                                <option value="onyx">Onyx</option>
+                                                <option value="nova">Nova</option>
+                                                <option value="shimmer">Shimmer</option>
+                                            </>)}
+                                            {ttsProvider === 'elevenlabs' && (<>
+                                                <option value="21m00Tcm4TlvDq8ikWAM">Rachel</option>
+                                                <option value="AZnzlk1XvdvUeBnXmlld">Domi</option>
+                                                <option value="EXAVITQu4vr4xnSDxMaL">Bella</option>
+                                                <option value="ErXwobaYiN019PkySvjV">Antoni</option>
+                                            </>)}
+                                        </select>
+
+                                        <div className="mt-4 mb-2">
+                                            <label className="text-sm font-medium text-gray-300 flex items-center gap-2 mb-2">
+                                                Agent Gender <span className="text-xs text-gray-500 font-normal">(affects grammar in Hindi, Gujarati, etc.)</span>
+                                            </label>
+                                            <select {...register('config.voice_gender')} className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white">
+                                                <option value="neutral">Neutral (Default)</option>
+                                                <option value="female">Female</option>
+                                                <option value="male">Male</option>
+                                            </select>
+                                        </div>
+                                        <ApiKeyInput
+                                            key={`tts-${ttsProvider}`}
+                                            provider={ttsProvider}
+                                            initialHasKey={localConfiguredProviders.includes(ttsProvider)}
+                                        />
+                                    </div>
+
+                                </div>
+
+                                {/* Silence & VAD */}
+                                <div className="rounded-lg bg-gray-900 p-6">
+                                    <h2 className="mb-4 text-lg font-semibold text-white">Silence & VAD</h2>
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-sm text-gray-400">Barge-in (Interrupt)</label>
+                                            <input type="checkbox" {...register('config.vad.barge_in')} />
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-gray-400">Silence Timeout (ms)</label>
+                                            <input
+                                                type="number"
+                                                {...register('config.vad.silence_timeout_ms', { valueAsNumber: true })}
+                                                className="mt-1 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-sm text-white"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
+                    </Tabs.Content>
 
-                    </div>
-                </div>
+                    <Tabs.Content value="canvas" className="outline-none">
+                        <div className="w-full h-full bg-gray-950 rounded-lg p-1 border border-gray-900 shadow-xl">
+                            <WorkflowEditor agentId={agent.id} initialSchema={agent.workflow_schema as any} onSyncSteps={handleSyncFromCanvas} />
+                        </div>
+                    </Tabs.Content>
+                </Tabs.Root>
             </form>
 
             {/* Download Modal */}

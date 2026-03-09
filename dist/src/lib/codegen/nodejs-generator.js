@@ -51,11 +51,13 @@ function generateNodeProject(agent) {
             ...(agent.config.tts?.provider === 'openai' && { "@livekit/agents-plugin-openai": "^1.0.44" }),
             ...(agent.config.tts?.provider === 'elevenlabs' && { "@livekit/agents-plugin-elevenlabs": "^1.0.44" }),
             "dotenv": "^16.4.0",
+            "better-sqlite3": "^11.1.2"
         },
         devDependencies: {
             "typescript": "^5.5.0",
             "tsx": "^4.19.0",
-            "@types/node": "^22.0.0"
+            "@types/node": "^22.0.0",
+            "@types/better-sqlite3": "^7.6.11"
         }
     }, null, 2);
     // --- README.md ---
@@ -207,6 +209,104 @@ export function buildSystemPrompt(
 \`;
 }
 `;
+    // --- database/db.ts ---
+    fileMap[`${dir}/database/db.ts`] = `import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dbPath = path.join(__dirname, '..', 'agent_data.db');
+
+let db: Database.Database;
+
+export function initDb() {
+  try {
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL'); // Better performance/concurrency
+    
+    // Create transcripts table
+    db.exec(\`
+      CREATE TABLE IF NOT EXISTS transcripts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        speaker TEXT NOT NULL,
+        text TEXT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    \`);
+    
+    // Create memories table
+    db.exec(\`
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT UNIQUE NOT NULL,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    \`);
+    
+    console.log('[DATABASE] Initialized successfully at agent_data.db');
+  } catch (error) {
+    console.error('[DATABASE] Failed to initialize database:', error);
+  }
+}
+
+export function saveTranscript(sessionId: string, speaker: string, text: string) {
+  if (!db) return;
+  try {
+    const stmt = db.prepare('INSERT INTO transcripts (session_id, speaker, text) VALUES (?, ?, ?)');
+    stmt.run(sessionId, speaker, text);
+  } catch (error) {
+    console.error('[DATABASE] Failed to save transcript:', error);
+  }
+}
+
+export function getDb() {
+  if (!db) initDb();
+  return db;
+}
+
+export function storeMemory(key: string, value: string) {
+  if (!db) return false;
+  try {
+    const stmt = db.prepare(\`
+      INSERT INTO memories (key, value) 
+      VALUES (?, ?) 
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+    \`);
+    stmt.run(key, value);
+    return true;
+  } catch (error) {
+    console.error('[DATABASE] Failed to store memory:', error);
+    return false;
+  }
+}
+
+export function getMemory(key: string): string | null {
+  if (!db) return null;
+  try {
+    const stmt = db.prepare('SELECT value FROM memories WHERE key = ?');
+    const row = stmt.get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  } catch (error) {
+    console.error('[DATABASE] Failed to get memory:', error);
+    return null;
+  }
+}
+
+export function deleteMemory(key: string): boolean {
+  if (!db) return false;
+  try {
+    const stmt = db.prepare('DELETE FROM memories WHERE key = ?');
+    const info = stmt.run(key);
+    return info.changes > 0;
+  } catch (error) {
+    console.error('[DATABASE] Failed to delete memory:', error);
+    return false;
+  }
+}
+`;
     // --- agent/input-validator.ts ---
     fileMap[`${dir}/agent/input-validator.ts`] = `/**
  * input-validator.ts
@@ -302,7 +402,9 @@ export class InputValidator {
         : `import * as openai from '@livekit/agents-plugin-openai';`;
     const ttsProviderImport = agent.config.tts?.provider === 'cartesia'
         ? `import * as cartesia from '@livekit/agents-plugin-cartesia';`
-        : `import * as openai from '@livekit/agents-plugin-openai';`;
+        : agent.config.tts?.provider === 'elevenlabs'
+            ? `import * as elevenlabs from '@livekit/agents-plugin-elevenlabs';`
+            : `import * as openai from '@livekit/agents-plugin-openai';`;
     const buildSTT = agent.config.stt?.provider === 'deepgram'
         ? `new deepgram.STT({
       apiKey: process.env.DEEPGRAM_API_KEY!,
@@ -319,7 +421,9 @@ export class InputValidator {
         : `new openai.LLM({ apiKey: process.env.OPENAI_API_KEY!, model: AGENT_CONFIG.llm.model as any })`;
     const buildTTS = agent.config.tts?.provider === 'cartesia'
         ? `new cartesia.TTS({ apiKey: process.env.CARTESIA_API_KEY!, voice: AGENT_CONFIG.tts.voice })`
-        : `new openai.TTS({ apiKey: process.env.OPENAI_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`;
+        : agent.config.tts?.provider === 'elevenlabs'
+            ? `new elevenlabs.TTS({ apiKey: process.env.ELEVENLABS_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`
+            : `new openai.TTS({ apiKey: process.env.OPENAI_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`;
     fileMap[`${dir}/agent/voice-agent.ts`] = `// ─── Optimize ONNX Threads for Small Containers ───
 process.env.OMP_NUM_THREADS = '1';
 process.env.ONNXRUNTIME_NUM_THREADS = '1';
@@ -335,8 +439,59 @@ import { AGENT_CONFIG } from '../config/agent-config.js';
 import { buildSystemPrompt } from '../config/system-prompt.js';
 import { WORKFLOW_STEPS } from '../config/workflow-steps.js';
 import { InputValidator } from './input-validator.js';
+import { initDb, saveTranscript, storeMemory, getMemory, deleteMemory } from '../database/db.js';
 
 dotenv.config();
+
+// Initialize the local SQLite database
+initDb();
+
+// ── Define Database Tools ──────────────────────────────────────────────────
+import { z } from 'zod';
+import { Tool } from '@livekit/agents';
+
+const storeMemoryTool = new Tool(
+  {
+    name: 'store_memory',
+    description: 'Save user preferences, history, facts, or any context you need to remember for later. It is a key-value store. This overwrites any existing value for the key.',
+    parameters: z.object({
+      key: z.string().describe('The name of the memory, e.g. "user_name" or "dietary_restrictions"'),
+      value: z.string().describe('The value to store for this memory key'),
+    }),
+  },
+  async ({ key, value }: { key: string; value: string }) => {
+    const success = storeMemory(key, value);
+    return success ? \`Successfully stored memory '\${key}' as '\${value}'\` : \`Failed to store memory '\${key}'\`;
+  }
+);
+
+const getMemoryTool = new Tool(
+  {
+    name: 'get_memory',
+    description: 'Retrieve a previously stored memory by its key.',
+    parameters: z.object({
+      key: z.string().describe('The exact key used when storing the memory'),
+    }),
+  },
+  async ({ key }: { key: string }) => {
+    const value = getMemory(key);
+    return value !== null ? \`Memory '\${key}' = \${value}\` : \`Memory '\${key}' not found\`;
+  }
+);
+
+const deleteMemoryTool = new Tool(
+  {
+    name: 'delete_memory',
+    description: 'Delete a previously stored memory by its key if it is no longer relevant.',
+    parameters: z.object({
+      key: z.string().describe('The exact key to delete'),
+    }),
+  },
+  async ({ key }: { key: string }) => {
+    const success = deleteMemory(key);
+    return success ? \`Successfully deleted memory '\${key}'\` : \`Memory '\${key}' not found or failed to delete\`;
+  }
+);
 
 export default defineAgent({
   entry: async (ctx: JobContext) => {
@@ -383,6 +538,11 @@ export default defineAgent({
       llm: llmInstance,
       tts: ttsInstance,
       instructions: systemPrompt,
+      fncCtx: {
+        get_memory: getMemoryTool,
+        store_memory: storeMemoryTool,
+        delete_memory: deleteMemoryTool,
+      } as any,
     });
 
     const session = new voice.AgentSession({
@@ -390,6 +550,11 @@ export default defineAgent({
       stt: sttInstance,
       llm: llmInstance,
       tts: ttsInstance,
+      fncCtx: {
+        get_memory: getMemoryTool,
+        store_memory: storeMemoryTool,
+        delete_memory: deleteMemoryTool,
+      } as any,
     });
 
     // ── Barge-in noise gate ───────────────────────────────────────────────────
@@ -445,6 +610,15 @@ export default defineAgent({
       }
 
       console.log(\`[VALIDATOR] ✅ Valid: "\${transcript.slice(0, 60)}"\`);
+      if (ctx.room) saveTranscript(ctx.room.name, 'user', transcript);
+    });
+
+    // ── Save Agent Speech ─────────────────────────────────────────────────────
+    (session as any).on?.('agent_speech_committed', (event: any) => {
+      const transcript = event?.transcript ?? event?.text ?? '';
+      if (transcript && ctx.room) {
+        saveTranscript(ctx.room.name, 'agent', transcript);
+      }
     });
 
     await session.start({ agent: voiceAgent, room: ctx.room });

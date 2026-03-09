@@ -3,6 +3,7 @@ import * as deepgram from '@livekit/agents-plugin-deepgram';
 import * as openaiPlugin from '@livekit/agents-plugin-openai';
 import * as cartesia from '@livekit/agents-plugin-cartesia';
 import * as googlePlugin from '@livekit/agents-plugin-google';
+import * as elevenlabsPlugin from '@livekit/agents-plugin-elevenlabs'; // ✅ FIXED: Added ElevenLabs import
 import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -382,21 +383,16 @@ export default defineAgent({
         console.log(`[AGENT] barge_in=${config.vad?.barge_in ?? true}, minInterruption=${bargeInMinMs}ms`);
 
         // ── Build STT ─────────────────────────────────────────────────────────
-        // Deepgram's built-in endpointing acts as our VAD — it runs on Deepgram's
-        // servers so there is zero CPU cost on the Render worker.
-        // interimResults: true is required for turnDetection:'vad' so the SDK
-        // receives the real-time speech signal and can trigger the LLM immediately
-        // after Deepgram fires end-of-utterance.
         let sttInstance: stt.STT | undefined;
         if (config.stt.provider === 'deepgram' && sttKey) {
             sttInstance = new deepgram.STT({
                 apiKey: sttKey,
                 model: config.stt.model as any,
-                endpointing: config.stt.options?.endpointing ?? 300,   // 300ms (was 400) — tighter EOU
+                endpointing: config.stt.options?.endpointing ?? 300,
                 smartFormat: config.stt.options?.smart_format ?? STT_DEFAULTS.smartFormat,
                 punctuate: config.stt.options?.punctuate ?? STT_DEFAULTS.punctuate,
                 noDelay: config.stt.options?.no_delay ?? STT_DEFAULTS.noDelay,
-                interimResults: true,    // required for turnDetection:'vad' with Deepgram
+                interimResults: true,
                 language: config.language || 'en',
             } as any);
         }
@@ -457,6 +453,7 @@ export default defineAgent({
 
         // ── Build TTS ─────────────────────────────────────────────────────────
         let ttsInstance: tts.TTS | undefined;
+
         if (config.tts.provider === 'cartesia' && ttsKey) {
             const cartesiaVoice = config.tts.voice || '794f9389-aac1-45b6-b726-9d9369183238';
             const cartesiaModel = config.tts.model || 'sonic-2';
@@ -466,14 +463,22 @@ export default defineAgent({
                 voice: cartesiaVoice,
                 model: cartesiaModel as any,
             });
+
+        } else if (config.tts.provider === 'elevenlabs' && ttsKey) {
+            // ✅ FIXED: Now correctly uses elevenlabsPlugin instead of openaiPlugin
+            const elVoice = config.tts.voice || '21m00Tcm4TlvDq8ikWAM';
+            const elModel = config.tts.model || 'eleven_turbo_v2';
+            console.log(`[TTS] ElevenLabs voice: ${elVoice}, model: ${elModel}`);
+            ttsInstance = new elevenlabsPlugin.TTS({
+                apiKey: ttsKey,
+                voice: { voiceId: elVoice } as any,
+                model: elModel as any,
+            });
+
         } else if (config.tts.provider === 'openai' && ttsKey) {
             const openaiVoice = config.tts.voice || 'alloy';
             console.log(`[TTS] OpenAI voice: ${openaiVoice}`);
             ttsInstance = new openaiPlugin.TTS({ apiKey: ttsKey, voice: openaiVoice as any });
-        } else if (config.tts.provider === 'elevenlabs' && ttsKey) {
-            const elVoice = config.tts.voice || '21m00Tcm4TlvDq8ikWAM';
-            console.log(`[TTS] ElevenLabs voice: ${elVoice}`);
-            ttsInstance = new openaiPlugin.TTS({ apiKey: ttsKey, voice: elVoice as any });
         }
 
         // ── Component check ───────────────────────────────────────────────────
@@ -488,10 +493,6 @@ export default defineAgent({
         // ── Session state ─────────────────────────────────────────────────────
         const state = makeState();
 
-        // ── No local VAD ──────────────────────────────────────────────────────
-        // Silero is intentionally omitted on Render CPU workers — see VAD_DEFAULTS
-        // comment at the top of this file for the full explanation.
-        // Turn detection is handled by Deepgram's built-in endpointing.
         console.log('[VAD] Using Deepgram server-side endpointing (no local Silero VAD).');
 
         // ── Input Validator ───────────────────────────────────────────────────
@@ -507,10 +508,6 @@ export default defineAgent({
         let silenceHandler: SilenceHandler;
 
         // ── Agent Session ─────────────────────────────────────────────────────
-        // turnDetection: 'vad' — fires immediately when Deepgram's endpointing
-        // signals end-of-speech. This is what triggers LLM → TTS → audio output.
-        // With turnDetection:'stt' on a slow CPU the final STT event is delayed
-        // past the pipeline deadline and audio output never arrives.
         const session = new voice.AgentSession({
             stt: sttInstance,
             llm: llmInstance,
@@ -527,7 +524,7 @@ export default defineAgent({
         // ─────────────────────────────────────────────────────────────────────
 
         const onSilenceTimeout = async () => {
-            if (state.sessionClosed) return;   // ← guard: session already torn down
+            if (state.sessionClosed) return;
             if (!state.greeting_delivered) return;
             if (!state.conversation_started) return;
             if (state.agent_speaking) return;
@@ -559,7 +556,6 @@ export default defineAgent({
                 } catch (e) { console.error('[SILENCE] say error:', e); }
 
             } else {
-                // Third silence → goodbye
                 state.goodbye_delivered = true;
                 silenceHandler.stop();
                 const goodbyeMsg = silenceMessages[2] || "Thank you for your time. Have a great day!";
@@ -579,7 +575,6 @@ export default defineAgent({
         // Session Event Listeners
         // ─────────────────────────────────────────────────────────────────────
 
-        // Track agent speaking state
         session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
             state.agent_speaking = (event.newState === 'speaking');
 
@@ -589,15 +584,13 @@ export default defineAgent({
             }
         });
 
-        // On each speech handle completion
         session.on(voice.AgentSessionEventTypes.SpeechCreated, (event) => {
             event.speechHandle.addDoneCallback(async (sh: any) => {
-                if (state.sessionClosed) return;   // ← guard: session already torn down
+                if (state.sessionClosed) return;
 
                 state.agent_speaking = false;
                 state.last_agent_speech_end = Date.now();
 
-                // ── Goodbye → disconnect ─────────────────────────────────
                 if (state.goodbye_delivered) {
                     setTimeout(async () => {
                         if (state.sessionClosed) return;
@@ -616,7 +609,6 @@ export default defineAgent({
                     return;
                 }
 
-                // ── Anti-hallucination: check response content ────────────
                 const messageContent = (sh.chatItems || [])
                     .map((c: any) => c.content || c.text || '')
                     .join('');
@@ -641,12 +633,10 @@ export default defineAgent({
                             );
                         } catch (e) { console.error('[ANTI-HALLUCINATION] Recovery say failed:', e); }
                     }
-                    // Restart silence timer without resetting count
                     if (state.silence_count < 3) { silenceHandler.startWaiting(); }
                     return;
                 }
 
-                // Reset empty counter on valid response
                 state.empty_response_count = 0;
                 state.last_valid_response_time = Date.now();
 
@@ -656,7 +646,6 @@ export default defineAgent({
                     return;
                 }
 
-                // ── Restart silence timer ────────────────────────────────
                 if (state.last_was_silence_message) {
                     state.last_was_silence_message = false;
                     console.debug('[SILENCE] Silence message delivered. Restarting timer.');
@@ -668,15 +657,12 @@ export default defineAgent({
             });
         });
 
-        // Clean up on session close — set the guard flag FIRST so every pending
-        // async callback (SpeechCreated done, silence timeout) exits immediately.
         session.on(voice.AgentSessionEventTypes.Close, () => {
             console.log('[AGENT] Session closed. Setting sessionClosed guard and stopping silence handler.');
             state.sessionClosed = true;
             silenceHandler.stop();
         });
 
-        // Session-level errors
         (session as any).on('error', (error: any) => {
             console.error('[SESSION] Session error:', error?.context?.type, error?.context?.error?.name);
             if (error?.context?.type === 'llm_error') {
@@ -684,7 +670,6 @@ export default defineAgent({
             }
         });
 
-        // LLM errors (recoverable vs fatal)
         (session as any).on('llm_error', (error: any) => {
             console.error('[AGENT] ❌ LLM error occurred:', error.message);
             if (error.recoverable) {
@@ -712,17 +697,15 @@ export default defineAgent({
         // ─────────────────────────────────────────────────────────────────────
 
         session.on(voice.AgentSessionEventTypes.UserInputTranscribed, async (event) => {
-            // Only process final (committed) transcripts
             if (!(event as any).isFinal) return;
-            if (state.sessionClosed) return;   // ← guard
+            if (state.sessionClosed) return;
 
             state.last_user_utterance_time = Date.now();
 
             const transcript: string = (event as any).transcript ?? '';
-            const confidence: number = 1.0;  // SDK doesn't expose confidence yet
-            const durationMs: number = 2000; // SDK doesn't expose duration yet — safe default
+            const confidence: number = 1.0;
+            const durationMs: number = 2000;
 
-            // ── Anti-hallucination: detect repeated transcripts ───────────
             if (transcript === state.last_transcript) {
                 state.same_transcript_count++;
                 if (state.same_transcript_count >= 3) {
@@ -730,7 +713,6 @@ export default defineAgent({
                         `[ANTI-HALLUCINATION] Transcript repeated ${state.same_transcript_count} times: ` +
                         `"${transcript.slice(0, 60)}". Possible VAD feedback loop.`
                     );
-                    // Do not forward to LLM — skip processing
                     return;
                 }
             } else {
@@ -738,7 +720,6 @@ export default defineAgent({
                 state.last_transcript = transcript;
             }
 
-            // ── First utterance → switch to normal silence timeout ─────────
             if (!state.conversation_started) {
                 state.conversation_started = true;
                 console.log('[AGENT] First user utterance received. Conversation started.');
@@ -748,7 +729,6 @@ export default defineAgent({
 
             console.debug('[SILENCE] User utterance committed. Waiting for agent response.');
 
-            // ── Goodbye trigger detection ─────────────────────────────────
             const goodbyeTriggers: string[] = config.goodbye_triggers || [
                 "goodbye", "bye", "that's all", "no thanks", "i'm good", "thank you",
                 "धन्यवाद", "बस", "ठीक है", "नमस्ते", "अलविदा",
@@ -766,7 +746,6 @@ export default defineAgent({
                 return;
             }
 
-            // ── Input validation ──────────────────────────────────────────
             const result = validator.validate(transcript, confidence, durationMs);
 
             if (!result.valid && result.reason) {
@@ -806,7 +785,6 @@ export default defineAgent({
 
             silenceHandler.stop();
 
-            // Brief delay so audio pipeline is ready
             await new Promise(r => setTimeout(r, 800));
 
             const greetingPhrase = "Hello, how can I help you today?";
@@ -818,7 +796,6 @@ export default defineAgent({
             }
 
             state.greeting_delivered = true;
-            // Silence timer starts when SpeechCreated → done callback fires
             console.log('[AGENT] Greeting complete. Silence timer will start via SpeechCreated callback.');
         });
 
@@ -829,7 +806,7 @@ export default defineAgent({
         ctx.addShutdownCallback(async () => {
             const duration = Math.floor((Date.now() - startTime) / 1000);
             console.log(`[AGENT] Session ended. Duration: ${duration}s`);
-            state.sessionClosed = true;   // ensure all callbacks stop immediately
+            state.sessionClosed = true;
             silenceHandler.stop();
 
             await saveTranscript({
@@ -848,7 +825,7 @@ export default defineAgent({
 
 cli.runApp(new WorkerOptions({
     agent: __filename,
-    initializeProcessTimeout: 60_000, // 60 s — tsx startup is slow
+    initializeProcessTimeout: 60_000,
     port: parseInt(process.env.PORT || '8081', 10),
     host: '0.0.0.0',
 }));

@@ -420,7 +420,9 @@ export class InputValidator {
 
   const ttsProviderImport = agent.config.tts?.provider === 'cartesia'
     ? `import * as cartesia from '@livekit/agents-plugin-cartesia';`
-    : `import * as openai from '@livekit/agents-plugin-openai';`;
+    : agent.config.tts?.provider === 'elevenlabs'
+      ? `import * as elevenlabs from '@livekit/agents-plugin-elevenlabs';`
+      : `import * as openai from '@livekit/agents-plugin-openai';`;
 
   const buildSTT = agent.config.stt?.provider === 'deepgram'
     ? `new deepgram.STT({
@@ -440,7 +442,9 @@ export class InputValidator {
 
   const buildTTS = agent.config.tts?.provider === 'cartesia'
     ? `new cartesia.TTS({ apiKey: process.env.CARTESIA_API_KEY!, voice: AGENT_CONFIG.tts.voice })`
-    : `new openai.TTS({ apiKey: process.env.OPENAI_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`;
+    : agent.config.tts?.provider === 'elevenlabs'
+      ? `new elevenlabs.TTS({ apiKey: process.env.ELEVENLABS_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`
+      : `new openai.TTS({ apiKey: process.env.OPENAI_API_KEY!, voice: AGENT_CONFIG.tts.voice as any })`;
 
   fileMap[`${dir}/agent/voice-agent.ts`] = `// ─── Optimize ONNX Threads for Small Containers ───
 process.env.OMP_NUM_THREADS = '1';
