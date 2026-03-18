@@ -1,0 +1,55 @@
+﻿Γû▓ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 9.7s
+  Running TypeScript ...
+node.exe : Failed to compile.
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (Failed   
+  to compile.:String) [],    
+ RemoteException
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+
+./src/app/dashboard/workspace
+s/[id]/build/page.tsx:1:45
+Type error: Cannot find 
+module '@supabase/auth-helper
+s-nextjs' or its 
+corresponding type 
+declarations.
+
+[0m[31m[1m>[22m[39m[90m
+ 1 |[39m [36mimport[39m { 
+createServerComponentClient 
+} [36mfrom[39m [32m'@supab
+ase/auth-helpers-nextjs'[39m
+ [90m   |[39m              
+                             
+  [31m[1m^[22m[39m
+ [90m 2 |[39m 
+[36mimport[39m { cookies } 
+[36mfrom[39m 
+[32m'next/headers'[39m
+ [90m 3 |[39m 
+[36mimport[39m { notFound 
+} [36mfrom[39m 
+[32m'next/navigation'[39m
+ [90m 4 |[39m 
+[36mimport[39m 
+[33mBuildPageClient[39m 
+[36mfrom[39m [32m'@/featur
+es/workflow/components/BuildP
+ageClient'[39m[0m
+Next.js build worker exited 
+with code: 1 and signal: null

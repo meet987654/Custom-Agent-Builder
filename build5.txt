@@ -1,0 +1,65 @@
+﻿Γû▓ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 10.0s
+  Running TypeScript ...
+node.exe : Failed to compile.
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (Failed   
+  to compile.:String) [],    
+ RemoteException
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+
+./src/features/workflow/compo
+nents/nodes/SpeakNode.tsx:20:
+11
+Type error: Type 'unknown' 
+is not assignable to type 
+'ReactNode'.
+
+[0m [90m 18 |[39m         
+    
+[33m<[39m[33mspan[39m cla
+ssName[33m=[39m[32m"text-s
+m font-medium text-[#3C3489]"
+[39m[33m>[39m{data[33m.[
+39mlabel [36mas[39m string 
+[33m||[39m [32m'Speak'[39
+m}[33m<[39m[33m/[39m[33m
+span[39m[33m>[39m
+ [90m 19 |[39m           [
+33m<[39m[33m/[39m[33mdiv
+[39m[33m>[39m
+[31m[1m>[22m[39m[90m 20 
+|[39m           
+{data[33m.[39mlanguage 
+[33m&&[39m (
+ [90m    |[39m           
+[31m[1m^[22m[39m
+ [90m 21 |[39m             
+[33m<[39m[33mspan[39m cla
+ssName[33m=[39m[32m"px-2 
+py-0.5 rounded-full 
+bg-purple-100 
+text-purple-800 
+text-[11px]"[39m[33m>[39m
+ [90m 22 |[39m             
+  {data[33m.[39mlanguage 
+[36mas[39m string}
+ [90m 23 |[39m             
+[33m<[39m[33m/[39m[33msp
+an[39m[33m>[39m[0m
+Next.js build worker exited 
+with code: 1 and signal: null
+

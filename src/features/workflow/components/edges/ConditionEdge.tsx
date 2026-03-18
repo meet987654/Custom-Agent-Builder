@@ -1,6 +1,7 @@
+'use client';
+
 import React from 'react';
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getBezierPath, Edge } from '@xyflow/react';
-import { WorkflowEdge } from '../../schema/workflowSchema';
 
 export default function ConditionEdge({
     id,
@@ -30,23 +31,18 @@ export default function ConditionEdge({
 
     // Edge coloring logic
     const strokeColor = selected
-        ? '#4f46e5' // indigo-600 when selected
+        ? '#3b82f6' // blue-500 when selected
         : isFallback
-            ? '#f43f5e' // rose-500 for fallback path
-            : conditions.length > 0
-                ? '#06b6d4' // cyan-500 for condition path
-                : '#4b5563'; // gray-600 for default unconfigured path
+            ? '#ef4444' // red-500 for fallback path
+            : '#1e3a8a'; // dark-blue for unconfigured path
 
     // Format label text based on conditions
-    let labelText = 'Unconfigured';
+    let labelText = '';
     if (isFallback) {
-        labelText = 'Fallback (Else)';
+        labelText = 'Fallback';
     } else if (conditions.length > 0) {
         const firstCond = conditions[0];
-        labelText = `If ${firstCond.type} ${firstCond.operator || ''} '${firstCond.value || ''}'`;
-        if (conditions.length > 1) {
-            labelText += ` (+${conditions.length - 1} more)`;
-        }
+        labelText = `${firstCond.type === 'intent' ? 'Intent' : 'Match'}: ${firstCond.value || '...'}`;
     }
 
     return (
@@ -58,24 +54,28 @@ export default function ConditionEdge({
                     ...(style || {}),
                     stroke: strokeColor,
                     strokeWidth: selected ? 3 : 2,
-                    filter: selected ? `drop - shadow(0 0 5px ${strokeColor}40)` : 'none'
+                    strokeDasharray: isFallback ? '5,5' : '8,8',
+                    filter: selected ? `drop-shadow(0 0 8px #3b82f6)` : 'none',
+                    transition: 'all 0.2s ease',
                 }}
             />
-            <EdgeLabelRenderer>
-                <div
-                    style={{
-                        position: 'absolute',
-                        transform: `translate(-50 %, -50 %) translate(${labelX}px, ${labelY}px)`,
-                        pointerEvents: 'all',
-                    }}
-                    className={`nodrag nopan px - 2 py - 1 rounded bg - gray - 900 border text - xs shadow - md font - medium z - 10 
-              ${selected ? 'border-indigo-500 shadow-indigo-500/20' : 'border-gray-700'}
-              ${isFallback ? 'text-rose-400' : conditions.length > 0 ? 'text-cyan-400' : 'text-gray-400'}
-`}
-                >
-                    {labelText}
-                </div>
-            </EdgeLabelRenderer>
+            {labelText && (
+                <EdgeLabelRenderer>
+                    <div
+                        style={{
+                            position: 'absolute',
+                            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+                            pointerEvents: 'all',
+                        }}
+                        className={`nodrag nopan px-2 py-0.5 rounded-full bg-[#11141d] border text-[9px] font-bold uppercase tracking-widest shadow-xl z-20 
+                        ${selected ? 'border-blue-500 text-blue-400' : 'border-gray-800 text-gray-500'}
+                        ${isFallback ? 'text-red-400 border-red-900/50' : ''}
+                        `}
+                    >
+                        {labelText}
+                    </div>
+                </EdgeLabelRenderer>
+            )}
         </>
     );
 }

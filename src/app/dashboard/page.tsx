@@ -3,7 +3,8 @@
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Download, MoreVertical, Copy, Play, Settings, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Download, MoreVertical, Copy, Play, Settings, Trash2, Sparkles, FileText } from 'lucide-react';
 import { DownloadCodeModal } from '@/components/DownloadCodeModal';
 import SignOutButton from '@/components/SignOutButton';
 
@@ -83,16 +84,44 @@ export default function DashboardPage() {
                         <h1 className="text-3xl font-bold tracking-tight">Voice Agents</h1>
                         <p className="mt-2 text-gray-400">Manage and deploy your AI voice workforce.</p>
                     </div>
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
                         <SignOutButton />
+                        <Link
+                            href="/onboarding/brief"
+                            className="flex items-center gap-2 rounded-lg border border-indigo-500/40 bg-indigo-600/10 px-5 py-3 text-sm font-semibold text-indigo-300 transition hover:bg-indigo-600/20 hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+                        >
+                            <FileText size={16} />
+                            + New Agent (Brief)
+                        </Link>
                         <button
                             onClick={() => setIsCreateModalOpen(true)}
                             className="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900"
                         >
-                            + Create New Agent
+                            + Clone Template
                         </button>
                     </div>
                 </header>
+
+                {/* ─── Empty State: Brief Form CTA ─── */}
+                {agents.length === 0 && (
+                    <div className="mb-8 rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/40 via-gray-900 to-violet-950/30 p-10 text-center shadow-xl">
+                        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600/20 text-indigo-400">
+                            <Sparkles size={32} />
+                        </div>
+                        <h2 className="text-2xl font-bold text-white">Create Your First Agent</h2>
+                        <p className="mx-auto mt-3 max-w-md text-gray-400">
+                            Answer a few questions and we&apos;ll build your agent skeleton automatically — complete with workflow, system prompt, and voice settings.
+                        </p>
+                        <Link
+                            href="/onboarding/brief"
+                            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-8 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all hover:from-indigo-500 hover:to-violet-500 hover:shadow-indigo-500/30"
+                        >
+                            <FileText size={16} />
+                            Start Brief Form →
+                        </Link>
+                        <p className="mt-4 text-xs text-gray-600">Or clone a template using the button above.</p>
+                    </div>
+                )}
 
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {/* Agent Cards */}

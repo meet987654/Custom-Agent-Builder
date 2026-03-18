@@ -11,6 +11,7 @@ import path from 'path';
 import { decrypt } from '../src/lib/encryption';
 import { InputValidator } from './input-validator';
 import { VALID_MODELS, DEFAULT_MODEL, resolveModel } from '../src/lib/constants/providers';
+import { lookupCaller, upsertCaller } from '../src/lib/contacts/lookup';
 
 // ─── Environment ────────────────────────────────────────────────────────────
 const envPath = path.join(process.cwd(), '.env.local');
@@ -61,6 +62,8 @@ interface AgentConfig {
     tools: any[];
     silence_behavior: any;
     key_overrides?: { [key: string]: string | undefined };
+    contact_memory_enabled?: boolean;
+    contact_fields?: string[];
 }
 
 // ─── Session State ───────────────────────────────────────────────────────────
@@ -232,7 +235,7 @@ Speak naturally in Hindi. Keep responses short — 1 to 2 sentences.`;
  *  6. Language / gender rules (if applicable)
  *  7. Critical anti-hallucination block (repeated at bottom for recency)
  */
-function buildSystemPrompt(config: AgentConfig): string {
+function buildSystemPrompt(config: AgentConfig, callerContextBlock?: string): string {
     const gender = config.voice_gender || 'neutral';
     const lang = config.language || config.stt?.options?.language || 'en';
 
@@ -272,6 +275,8 @@ function buildSystemPrompt(config: AgentConfig): string {
 ──────────────────────────────────────────────────────────
 CORE MANDATES — FOLLOW THESE 100% WITHOUT EXCEPTION
 ──────────────────────────────────────────────────────────
+
+${callerContextBlock ? callerContextBlock : ''}
 
 <purpose_lock>
 Your ONLY job is: ${purposeStatement}
@@ -429,6 +434,14 @@ export default defineAgent({
             return;
         }
 
+        // ── Contact Memory Setup ──────────────────────────────────────────────
+        // In a real SIP system, metadata.caller_id or identity is used.
+        // For LiveKit node SDK Room, participant maps are typically in remoteParticipants
+        const firstParticipant = Array.from(ctx.room.remoteParticipants.values())[0];
+        const callerPhone = metadata.caller_phone || firstParticipant?.identity || '+910000000000';
+        let callerContextBlock = '';
+        let matchedContact: any = null;
+
         // ── Load agent config ─────────────────────────────────────────────────
         console.log(`[AGENT] Loading config for agent ID: ${agentId}`);
         const { data: agentRecord, error: agentError } = await supabase
@@ -447,6 +460,30 @@ export default defineAgent({
             `[AGENT] Config loaded. STT: ${config.stt?.provider}, ` +
             `LLM: ${config.llm?.provider}, TTS: ${config.tts?.provider}`
         );
+
+        if (config.contact_memory_enabled === true && callerPhone) {
+            console.log(`[CONTACTS] Memory enabled. Looking up caller: ${callerPhone}`);
+            matchedContact = await lookupCaller(agentId, callerPhone);
+            
+            if (matchedContact) {
+                console.log(`[CONTACTS] Returning caller found. Total calls: ${matchedContact.total_calls}`);
+                callerContextBlock = `
+=== RETURNING CALLER CONTEXT ===
+IMPORTANT: You already know this caller.
+Do NOT ask for information you already have.
+Greet them warmly by name if available.
+Known details:
+- Name: ${matchedContact.name || 'Unknown'}
+- Total previous calls: ${matchedContact.total_calls}
+- Last called: ${matchedContact.last_seen_at}
+- Previously collected details: ${JSON.stringify(matchedContact.custom_data)}
+Skip any workflow steps that collect already-known information.
+=== END RETURNING CALLER CONTEXT ===
+`;
+            } else {
+                 console.log(`[CONTACTS] New caller detected.`);
+            }
+        }
 
         // ── Resolve API keys ──────────────────────────────────────────────────
         const sttKey = await resolveApiKey(config.stt.provider, agentRecord);
@@ -582,7 +619,7 @@ export default defineAgent({
         const validator = new InputValidator(INPUT_VALIDATION_DEFAULTS);
 
         // ── System prompt ─────────────────────────────────────────────────────
-        const systemPrompt = buildSystemPrompt(config);
+        const systemPrompt = buildSystemPrompt(config, callerContextBlock);
 
         // ── Voice Agent ───────────────────────────────────────────────────────
         const voiceAgent = new voice.Agent({ instructions: systemPrompt });
@@ -918,6 +955,23 @@ export default defineAgent({
                 transcript_json: [],
                 metadata: { avg_latency: 0 },
             });
+
+            // Fire-and-forget contact save
+            if (config.contact_memory_enabled === true && callerPhone) {
+                // Heuristic: Extracting variables happens in a real parser. Here we dummy 
+                // the extraction based on transcript, since we don't have a formal state 
+                // engine variable state dict in this skeleton. In a real system you'd map state machine 
+                // "current.variables" -> "contact_fields".
+                
+                // Demo dummy payload for demonstration (in lieu of the LLM var extractor running).
+                const extractedFields = {
+                   /* "Email": "demo@example.com" */
+                };
+
+                upsertCaller(agentId, callerPhone, { custom_data: extractedFields })
+                    .then(() => console.log(`[CONTACTS] Contact saved/updated for ${callerPhone} in background.`))
+                    .catch(e => console.error(`[CONTACTS] Failed to save background contact state:`, e));
+             }
         });
     },
 });

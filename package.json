@@ -12,6 +12,7 @@
     "worker:dev": "tsx worker/agent.ts dev"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^2.0.4",
     "@hookform/resolvers": "^5.2.2",
     "@livekit/agents": "^1.0.44",
     "@livekit/agents-plugin-cartesia": "^1.0.44",
@@ -20,7 +21,8 @@
     "@livekit/agents-plugin-google": "^1.0.44",
     "@livekit/agents-plugin-openai": "^1.0.44",
     "@livekit/agents-plugin-silero": "^1.0.44",
-    "@livekit/components-react": "^2.9.19",
+    "@livekit/components-react": "^2.9.20",
+    "@livekit/components-styles": "^1.2.0",
     "@livekit/rtc-node": "^0.13.24",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-tabs": "^1.1.13",
